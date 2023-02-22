@@ -1,18 +1,14 @@
 import asyncio
-# import html.parser
-# import pathlib
 import time
-# import urllib.parse
 from typing import List, Iterable
 from config import S2_API_KEY, S2_RATE_LIMIT
 # import httpx  # https://github.com/encode/httpx
 import aiohttp
 import logging
 from pymongo import MongoClient
+# from motor.motor_asyncio import AsyncIOMotorClient
 import requests
-# from aiolimiter import AsyncLimiter
 
-# limiter = AsyncLimiter(S2_RATE_LIMIT)
 
 LOG_FILE = 'logs/crawler.log'
 
@@ -23,8 +19,15 @@ formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(messag
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
 file_handler = logging.FileHandler(LOG_FILE)
+file_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 logger.addHandler(file_handler)
+
+
+# async def create_async_crawler(settings):
+#     crawler = Crawler.from_dict(settings)
+#     await crawler.init_db()
+#     return crawler
 
 
 class Crawler:
@@ -56,13 +59,20 @@ class Crawler:
             'Content-type': 'application/json',
             'x-api-key': S2_API_KEY
         }
-        # self.semaphore = asyncio.Semaphore(s2_rate_limit)
+
+        self.semaphore = asyncio.Semaphore(s2_rate_limit)
+
+    @classmethod
+    def from_dict(cls, settings: dict):
+        return cls(**settings)
 
     def init_db(self):
         client = MongoClient(self.mongo_url)
+        # client = AsyncIOMotorClient(self.mongo_url)
         collection_name = 'async_crawler'
         self.db = client['refpred']
-        if collection_name in self.db.list_collection_names():
+        all_collections = self.db.list_collection_names()
+        if collection_name in all_collections:
             logger.info(f"Dropped pre-existing '{collection_name}' collection")
             self.db.drop_collection(collection_name)
         test_collection = self.db[collection_name]
@@ -88,14 +98,13 @@ class Crawler:
             return None
         logger.info(f"Fetching intial paper {initial_paper_id}")
         result_data = response.json()
-        result_data['_id'] = result_data['paperId']
+        # result_data['_id'] = result_data['paperId']
         await self.on_found_papers([result_data], initial=True)  # prime the queue
         workers = [
             asyncio.create_task(self.worker())
             for _ in range(self.num_workers)
         ]
         await self.todo.join()
-
         for worker in workers:
             worker.cancel()
 
@@ -120,9 +129,10 @@ class Crawler:
     async def crawl(self, cur_paper: dict):
         # rate limiting to 100 requests / second
         await asyncio.sleep(1/self.num_workers)
+        # await asyncio.sleep(0.5)
         cur_paper_id = cur_paper['paperId']
         ref_url = self.get_reference_url(cur_paper_id)
-        cur_paper['_id'] = cur_paper_id
+        # cur_paper['_id'] = cur_paper_id
         # response = await self.client.get(cur_paper, follow_redirects=True)
         # async with self.semaphore:
         logger.info(f"Fetching references for {cur_paper_id}")
@@ -133,6 +143,8 @@ class Crawler:
             if response.status != 200:
                 logger.exception(f"Error fetching references for {cur_paper_id}")
                 return None
+            # else:
+            #     logger.info(f"Found references for {cur_paper_id}")
             result_data = await response.json()
             found_references = result_data['data']
             # cur_paper['references'] = found_references
@@ -140,20 +152,17 @@ class Crawler:
             ref_ids = [ref['paperId'] for ref in found_references if ref['paperId'] is not None]
             cur_paper['references'] = ref_ids
             cur_paper['allReferencesStored'] = True
-            if ref_ids:
-                if len(ref_ids) != cur_paper['referenceCount']:
-                    cur_paper['allReferencesStored'] = False
-                    # logger.warning(f"Reference count mismatch for {cur_paper_id}") TODO uncomment
-                self.collection.insert_one(cur_paper)
+            if len(ref_ids) != cur_paper['referenceCount']:
+                cur_paper['allReferencesStored'] = False
+            self.collection.insert_one(cur_paper)
 
         # found_references = await self.get_paper_references(
         #     base=str(response.url),
         #     text=response.text,
         # )
 
-        await self.on_found_papers(found_references)
-
         self.done.add(cur_paper['paperId'])
+        await self.on_found_papers(found_references)
 
     # async def get_paper_references(self, base: str, text: str) -> set[str]:
     #     parser = UrlParser(base, self.filter_url)
@@ -179,6 +188,9 @@ class Crawler:
     async def put_todo(self, paper: dict):
         # paper is a dict with fields like paper_id, title, abstract, etc.
         if self.total >= self.max_papers:
+            # if len(self.done) >= self.max_papers:
+            # logger.info(f"Current todo queue size: {self.todo.qsize()}")
+            # logger.info(f"Current done set size: {len(self.done)}")
             return
         self.total += 1
         await self.todo.put(paper)
@@ -200,37 +212,34 @@ async def main():
             initial_papers=["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
             # filter_url=filterer.filter_url,
             workers=100,
-            max_papers=1000,
+            max_papers=923,
         )
+        # settings = {
+        #     'client': client,
+        #     'initial_papers': ["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
+        #     'workers': 100,
+        #     'max_papers': 100,
+        # }
+        # crawler = await create_async_crawler(settings)
+        # time.sleep(1)
         await crawler.run()
     end = time.perf_counter()
 
-    seen = sorted(crawler.seen)
+    # seen = sorted(crawler.seen)
     print("Results:")
-    for paper in seen:
-        print(paper)
+    # for paper in seen:
+    #     print(paper)
     print(f"Crawled: {len(crawler.done)} Papers")
-    print(f"Found: {len(seen)} Papers")
+    print(f"Found: {len(crawler.seen)} Papers")
     print(f"Done in {end - start:.2f}s")
+
+    # code to check which of seen are not in database
+    # for id, paper_id in enumerate(crawler.done, 1):
+    #     if crawler.collection.find_one({'_id': paper_id}):
+    #         print(f"{id}. Paper {paper_id} in database")
+    #     else:
+    #         print(f"{id}. Paper {paper_id} not in database")
 
 
 if __name__ == '__main__':
-    asyncio.run(main(), debug=True)
-
-
-async def homework():
-    """
-    Ideas for you to implement to test your understanding:
-    - Respect robots.txt *IMPORTANT*
-    - Find all links in sitemap.xml
-    - Provide a user agent
-    - Normalize urls (make sure not to count mcoding.io and mcoding.io/ as separate)
-    - Skip filetypes (jpg, pdf, etc.) or include only filetypes (html, php, etc.)
-    - Max depth
-    - Max concurrent connections per domain
-    - Rate limiting
-    - Rate limiting per domain
-    - Store connections as graph
-    - Store results to database
-    - Scale
-    """
+    asyncio.run(main())

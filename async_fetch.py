@@ -1,4 +1,4 @@
-from config import S2_API_KEY
+from config import S2_API_KEY, S2_RATE_LIMIT
 # import numpy as np
 # import pandas as pd
 import logging
@@ -20,9 +20,9 @@ logger.addHandler(stream_handler)
 
 # print(next(papers))
 base_url = 'https://api.semanticscholar.org/graph/v1'
-batch_url = 'https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,referenceCount,citationCount,authors,externalIds'
+# batch_url = 'https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,referenceCount,citationCount,authors,externalIds'
 
-
+batch_url = 'https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles'
 headers = {
     'Content-type': 'application/json',
     'x-api-key': S2_API_KEY
@@ -61,31 +61,35 @@ def get_reference_url(paper_id, is_arxiv=False):
     return f'https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references?fields=title,abstract'
 
 
-def add_to_db(obj_list):
+def add_to_db(obj_list, db_name='refpred', collection_name='test'):
     client = MongoClient("mongodb://localhost:27017")
     db = client['refpred']
 
     # drop 'test' collection if it exists
-    if 'test' in db.list_collection_names():
-        logging.info("Dropped pre-existing 'test' collection")
-        db.drop_collection('test')
+    if collection_name in db.list_collection_names():
+        logger.info(f"Dropped pre-existing '{collection_name}' collection")
+        db.drop_collection(collection_name)
 
     time.sleep(3)
     # create new 'test' collection
-    test_collection = db['test']
-    logger.info("Created 'test' collection")
+    test_collection = db[collection_name]
+    logger.info(f"Created '{collection_name}' collection")
     test_collection.insert_many(obj_list)
-    logger.info(f"Added {len(obj_list)} papers to test collection")
+    logger.info(f"Added {len(obj_list)} papers to '{collection_name}' collection")
 
 
-async def add_refs_to_paper_obj(loop, session, paper_object, papers, semaphore):
+async def add_refs_to_paper_obj(session, paper_object, papers, semaphore):
     arxiv_id = paper_object['externalIds']['ArXiv']
     url = get_reference_url(arxiv_id, is_arxiv=True)
+    paper_object['_id'] = paper_object['paperId']
     for paper in papers:
         if paper['arxiv_id'] == arxiv_id:
             paper_object['abstract'] = paper['abstract']
     async with semaphore:
         async with session.get(url, headers=headers) as response:
+            if response.status != 200:
+                logger.error(f"Error fetching references for {arxiv_id}")
+                return paper_object
             logger.info(f"Fetching references for {arxiv_id}")
             result_data = await response.json()
             reference_papers = result_data['data']
@@ -95,16 +99,17 @@ async def add_refs_to_paper_obj(loop, session, paper_object, papers, semaphore):
 
 
 async def main(batch_response, papers):
-    semaphore = asyncio.Semaphore(2)  # allow 5 requests at a time
+    semaphore = asyncio.Semaphore(S2_RATE_LIMIT)  # allow 5 requests at a  time
     async with aiohttp.ClientSession() as session:
         tasks = []
         for paper_obj in batch_response:
             task = asyncio.ensure_future(add_refs_to_paper_obj(
-                asyncio.get_event_loop(), session, paper_obj, papers, semaphore))
+                session, paper_obj, papers, semaphore))
             tasks.append(task)
         paper_list = await asyncio.gather(*tasks)
-        add_to_db(paper_list)
-        # print(paper_list)
+
+    add_to_db(paper_list, collection_name='test2')
+    # print(paper_list)
 
 
 if __name__ == '__main__':

@@ -19,11 +19,15 @@
 #     print(f"Semantic Scholar did not return status 200 response")
 
 
-def func():
-    print(var)
+# importing Mongoclient from pymongo
+
+from typing import List, Iterable
 
 
-if __name__ == '__main__':
-    # print('hi')
-    var = 'hi'
-    func()
+def func(a1: List[int]):
+    for i in a1:
+        print(i)
+
+
+if __name__ == "__main__":
+    func([1, 2, 3])

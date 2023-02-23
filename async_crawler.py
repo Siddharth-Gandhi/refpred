@@ -38,9 +38,8 @@ class Crawler:
             workers: int = 10,
             max_papers: int = 100,
             s2_rate_limit: int = 20,
-            # mongo_client: MongoClient = None,
             mongo_url: str = 'mongodb://localhost:27017',
-    ):
+    ) -> None:
         self.client = client
         # self.mongo_client = mongo_client
         self.mongo_url = mongo_url
@@ -60,13 +59,13 @@ class Crawler:
             'x-api-key': S2_API_KEY
         }
 
-        self.semaphore = asyncio.Semaphore(s2_rate_limit)
+        # self.semaphore = asyncio.Semaphore(s2_rate_limit)
 
     @classmethod
-    def from_dict(cls, settings: dict):
+    def from_dict(cls, settings: dict) -> 'Crawler':
         return cls(**settings)
 
-    def init_db(self):
+    def init_db(self) -> None:
         client = MongoClient(self.mongo_url)
         # client = AsyncIOMotorClient(self.mongo_url)
         collection_name = 'async_crawler'
@@ -89,7 +88,7 @@ class Crawler:
             return f'https://api.semanticscholar.org/graph/v1/paper/arXiv:{paper_id}?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles'
         return f'https://api.semanticscholar.org/graph/v1/paper/{paper_id}?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles'
 
-    async def run(self):
+    async def run(self) -> None:
         initial_paper_id = self.initial_papers[0]
         initial_url = self.get_paper_url(initial_paper_id)
         response = requests.get(initial_url, headers=self.headers)
@@ -108,14 +107,14 @@ class Crawler:
         for worker in workers:
             worker.cancel()
 
-    async def worker(self):
+    async def worker(self) -> None:
         while True:
             try:
                 await self.process_one()
             except asyncio.CancelledError:
                 return
 
-    async def process_one(self):
+    async def process_one(self) -> None:
         # cur_paper is a dict
         cur_paper = await self.todo.get()
         try:
@@ -126,23 +125,26 @@ class Crawler:
         finally:
             self.todo.task_done()
 
-    async def crawl(self, cur_paper: dict):
+    async def crawl(self, cur_paper: dict) -> None:
         # rate limiting to 100 requests / second
         await asyncio.sleep(1/self.num_workers)
-        # await asyncio.sleep(0.5)
+        # await asyncio.sleep(0.1)
         cur_paper_id = cur_paper['paperId']
         ref_url = self.get_reference_url(cur_paper_id)
         # cur_paper['_id'] = cur_paper_id
         # response = await self.client.get(cur_paper, follow_redirects=True)
         # async with self.semaphore:
-        logger.info(f"Fetching references for {cur_paper_id}")
         async with self.client.get(ref_url, headers=self.headers) as response:
             # if self.semaphore.locked():
             #     logger.warning(f"Semaphore locked for {cur_paper_id}")
             #     await asyncio.sleep(1)
             if response.status != 200:
-                logger.exception(f"Error fetching references for {cur_paper_id}")
-                return None
+                # logger.exception(
+                #     f"Error fetching references for {cur_paper_id} - {response.status}")
+                # raise Exception(f"Error fetching references for {cur_paper_id} - {response.status}")
+                raise aiohttp.web.HTTPException(
+                    f"Error fetching references for {cur_paper_id} - {response.status}")
+            logger.info(f"Fetching references for {cur_paper_id} - {response.status}")
             # else:
             #     logger.info(f"Found references for {cur_paper_id}")
             result_data = await response.json()
@@ -169,7 +171,7 @@ class Crawler:
     #     parser.feed(text)
     #     return parser.found_references
 
-    async def on_found_papers(self, papers: List[dict], initial: bool = False):
+    async def on_found_papers(self, papers: List[dict], initial: bool = False) -> None:
         # print(papers)
         if initial:
             for paper in papers:
@@ -177,7 +179,7 @@ class Crawler:
             return
         ids = {paper['paperId'] for paper in papers if paper['paperId'] is not None}
         new = ids - self.seen
-        self.seen.update(new)  # TODO review and maybe uncomment this
+        self.seen.update(new)
 
         # await save to database or file here...
 
@@ -185,7 +187,7 @@ class Crawler:
             if paper['paperId'] in new:
                 await self.put_todo(paper)
 
-    async def put_todo(self, paper: dict):
+    async def put_todo(self, paper: dict) -> None:
         # paper is a dict with fields like paper_id, title, abstract, etc.
         if self.total >= self.max_papers:
             # if len(self.done) >= self.max_papers:
@@ -196,7 +198,7 @@ class Crawler:
         await self.todo.put(paper)
 
 
-async def main():
+async def main() -> None:
     # filterer = UrlFilterer(
     #     allowed_domains={"mcoding.io"},
     #     allowed_schemes={"http", "https"},
@@ -212,7 +214,7 @@ async def main():
             initial_papers=["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
             # filter_url=filterer.filter_url,
             workers=100,
-            max_papers=923,
+            max_papers=10000,
         )
         # settings = {
         #     'client': client,

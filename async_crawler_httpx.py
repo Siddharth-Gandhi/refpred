@@ -3,7 +3,7 @@ import logging
 import time
 from typing import List
 
-import aiohttp
+import httpx  # https://github.com/encode/httpx
 
 # from motor.motor_asyncio import AsyncIOMotorClient
 import requests
@@ -11,7 +11,7 @@ from pymongo import MongoClient
 
 from config import S2_API_KEY, S2_RATE_LIMIT
 
-# import httpx  # https://github.com/encode/httpx
+# import aiohttp
 
 
 LOG_FILE = "logs/crawler.log"
@@ -41,7 +41,7 @@ class Crawler:
 
     def __init__(
         self,
-        client: aiohttp.ClientSession,
+        client: httpx.AsyncClient,
         # intial paper IDs to start crawling from
         initial_papers: List[str],
         workers: int = 10,
@@ -111,7 +111,7 @@ class Crawler:
         initial_url = self.get_paper_url(initial_paper_id)
         response = requests.get(initial_url, headers=self.headers, timeout=10)
         if response.status_code != 200:
-            logger.exception(f"Error fetching paper {initial_paper_id}")
+            logger.error(f"Error fetching paper {initial_paper_id}")
             return None
         logger.debug(f"Fetching intial paper {initial_paper_id}")
         result_data = response.json()
@@ -147,11 +147,12 @@ class Crawler:
                     f"Error processing {cur_paper['_id']}: {exc.__class__.__name__}"
                 )
                 return
-            logger.warning(
+            logger.error(
                 f"Retrying for {cur_paper['_id']} - {exc.__class__.__name__}"
             )
             self.retry.add(cur_paper["_id"])
             # await self.todo.put_nowait(cur_paper)
+            await asyncio.sleep(0.5)
             await self.crawl(cur_paper)
         finally:
             self.todo.task_done()
@@ -160,7 +161,6 @@ class Crawler:
         """
         Crawl a paper and its references
         """
-        # sourcery skip: raise-specific-error
         # TODO proper rate limiting to 100 requests / second
         # await asyncio.sleep(1 / self.num_workers)
         await asyncio.sleep(0.5)
@@ -170,31 +170,39 @@ class Crawler:
         cur_paper["_id"] = cur_paper_id
         # async with self.semaphore:
         # async with self.client.get(ref_url, headers=self.headers) as response:
-        response = await self.client.get(
-            ref_url, headers=self.headers, timeout=300
-        )
+
+        # timeout = httpx.Timeout(10.0, read_timeout=None)
+
+        response = await self.client.get(ref_url, headers=self.headers)
 
         # if self.semaphore.locked():
         #     logger.warning(f"Semaphore locked for {cur_paper_id}")
         #     await asyncio.sleep(1)
 
-        if response.status != 200:
+        if response.status_code == 429:
+            logger.critical(
+                f"Rated limited for {cur_paper_id} - {response.status_code}"
+            )
+            # await self.todo.put_nowait(cur_paper)
+            await asyncio.sleep(1)
+            await self.crawl(cur_paper)
+            return
+
+        if response.status_code != 200:
             logger.error(
-                f"Error fetching references for {cur_paper_id} - {response.status}"
+                f"Error fetching references for {cur_paper_id} - {response.status_code}"
             )
             # raise specific exception
             # return
             raise asyncio.exceptions.TimeoutError(
-                f"Error fetching references for {cur_paper_id} - {response.status}"
+                f"Error fetching references for {cur_paper_id} - {response.status_code}"
             )
 
         logger.debug(
-            f"Fetching references for {cur_paper_id} - {response.status}"
+            f"Fetching references for {cur_paper_id} - {response.status_code}"
         )
-        try:
-            result_data = await response.json()
-        except Exception as exc:
-            raise exc
+
+        result_data = response.json()
         found_references = result_data["data"]
         found_references = [ref["citedPaper"] for ref in found_references]
 
@@ -251,13 +259,13 @@ class Crawler:
 
 async def main() -> None:
     start = time.perf_counter()
-    timeout_sec = 100
-    my_timeout = aiohttp.ClientTimeout(total=None)
-    client_args = dict(
-        timeout=my_timeout,
-        trust_env=True,
-    )
-    async with aiohttp.ClientSession(**client_args) as client:
+    # timeout_sec = 100
+    # my_timeout = aiohttp.ClientTimeout(total=None)
+    # client_args = dict(
+    #     timeout=my_timeout,
+    #     trust_env=True,
+    # )
+    async with httpx.AsyncClient(timeout=100) as client:
         # starting with the famous paper 'Attention is all you need'
         # https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/204e3073870fae3d05bcbc2f6a8e263d9b72e776
         crawler = Crawler(
@@ -265,9 +273,9 @@ async def main() -> None:
             initial_papers=["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
             # filter_url=filterer.filter_url,
             workers=S2_RATE_LIMIT,
-            max_papers=5000,
+            max_papers=10000,
             db_name="refpred",
-            collection_name="async_crawler_test",
+            collection_name="async_crawler_test2",
         )
         # settings = {
         #     'client': client,

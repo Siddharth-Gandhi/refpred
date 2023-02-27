@@ -1,14 +1,16 @@
-from config import S2_API_KEY, S2_RATE_LIMIT
+import asyncio
+import json
 # import numpy as np
 # import pandas as pd
 import logging
-from data.db import get_papers_db
-import requests
-import json
-from pymongo import MongoClient
-import asyncio
-import aiohttp
 import time
+
+import aiohttp
+import requests
+from pymongo import MongoClient
+
+from config import S2_API_KEY, S2_RATE_LIMIT
+from data.db import get_papers_db
 
 pdb = get_papers_db(flag='r')
 logger = logging.getLogger(__name__)

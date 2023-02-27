@@ -4,6 +4,7 @@ import time
 from typing import List
 
 import httpx  # https://github.com/encode/httpx
+
 # from motor.motor_asyncio import AsyncIOMotorClient
 import requests
 from pymongo import MongoClient
@@ -18,12 +19,10 @@ LOG_FILE = "logs/crawler.log"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-formatter = logging.Formatter(
-    "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 stream_handler = logging.StreamHandler()
 stream_handler.setFormatter(formatter)
-file_handler = logging.FileHandler(LOG_FILE)
+file_handler = logging.FileHandler(LOG_FILE, mode="w")
 file_handler.setFormatter(formatter)
 logger.addHandler(stream_handler)
 logger.addHandler(file_handler)
@@ -33,6 +32,18 @@ logger.addHandler(file_handler)
 #     crawler = Crawler.from_dict(settings)
 #     await crawler.init_db()
 #     return crawler
+
+
+class RateLimitExceededException(Exception):
+    """Exception raised when rate limit is exceeded"""
+
+    pass
+
+
+class TimeoutException(Exception):
+    """Exception raised when a request times out"""
+
+    pass
 
 
 class Crawler:
@@ -84,9 +95,7 @@ class Crawler:
         self.db = client[self.db_name]
         all_collections = self.db.list_collection_names()
         if self.collection_name in all_collections:
-            logger.warning(
-                f"Dropped pre-existing '{self.collection_name}' collection"
-            )
+            logger.warning(f"Dropped pre-existing '{self.collection_name}' collection")
             self.db.drop_collection(self.collection_name)
         test_collection = self.db[self.collection_name]
         logger.info(f"Created '{self.collection_name}' collection")
@@ -121,9 +130,7 @@ class Crawler:
     async def run(self) -> None:
         """Run the crawler by creating workers until todo queue is empty"""
         await self.init_queue()
-        workers = [
-            asyncio.create_task(self.worker()) for _ in range(self.num_workers)
-        ]
+        workers = [asyncio.create_task(self.worker()) for _ in range(self.num_workers)]
         await self.todo.join()
         for worker in workers:
             worker.cancel()
@@ -136,25 +143,30 @@ class Crawler:
             except asyncio.CancelledError:
                 return
 
+    async def retry_crawl(self, paper):
+        """Retry crawling a paper in case of an exception"""
+        if paper["_id"] in self.retry:
+            logger.error(f"Error processing {paper['_id']} even after retrying")
+            return
+        logger.error(f"Retrying for {paper['_id']}")
+        self.retry.add(paper["_id"])
+        # await self.todo.put_nowait(cur_paper)
+        await self.crawl(paper)
+
     async def process_one(self) -> None:
         """Gets one paper from the queue and processes it"""
         # cur_paper is a dict
         cur_paper = await self.todo.get()
         try:
             await self.crawl(cur_paper)
-        except Exception as exc:
-            if cur_paper["_id"] in self.retry:
-                logger.error(
-                    f"Error processing {cur_paper['_id']}: {exc.__class__.__name__}"
-                )
-                return
-            logger.error(
-                f"Retrying for {cur_paper['_id']} - {exc.__class__.__name__}"
-            )
-            self.retry.add(cur_paper["_id"])
-            # await self.todo.put_nowait(cur_paper)
-            await asyncio.sleep(0.5)
-            await self.crawl(cur_paper)
+        except TimeoutException as te:
+            # logger.warning(f"Timeout for {cur_paper['_id']}")
+            logger.error(te)
+            await self.retry_crawl(cur_paper)
+        except RateLimitExceededException:
+            logger.critical("Rate limit exceeded, retrying in 2 second")
+            await asyncio.sleep(2)
+            await self.retry_crawl(cur_paper)
         finally:
             self.todo.task_done()
 
@@ -169,10 +181,11 @@ class Crawler:
         cur_paper_id = cur_paper["paperId"]
         ref_url = self.get_reference_url(cur_paper_id)
         cur_paper["_id"] = cur_paper_id
+        if cur_paper["title"] is None or cur_paper["abstract"] is None:
+            logger.debug(f"Skipping {cur_paper_id} as empty title or abstract")
+            return
         # async with self.semaphore:
         # async with self.client.get(ref_url, headers=self.headers) as response:
-
-        # timeout = httpx.Timeout(10.0, read_timeout=None)
 
         response = await self.client.get(ref_url, headers=self.headers)
 
@@ -181,37 +194,33 @@ class Crawler:
         #     await asyncio.sleep(1)
 
         if response.status_code == 429:
-            logger.critical(
+            # logger.critical(
+            #     f"Rated limited for {cur_paper_id} - {response.status_code}"
+            # )
+            # # await self.todo.put_nowait(cur_paper)
+            # await asyncio.sleep(1)
+            # await self.crawl(cur_paper)
+            raise RateLimitExceededException(
                 f"Rated limited for {cur_paper_id} - {response.status_code}"
             )
-            # await self.todo.put_nowait(cur_paper)
-            await asyncio.sleep(1)
-            await self.crawl(cur_paper)
-            return
+
+        if response.status_code == 504:
+            # raise asyncio.exceptions.TimeoutError(
+            #     f"Timeout for {cur_paper_id} - {response.status_code}"
+            # )
+            raise TimeoutException(f"Timeout for {cur_paper_id} - {response.status_code}")
 
         if response.status_code != 200:
-            logger.error(
-                f"Error fetching references for {cur_paper_id} - {response.status_code}"
-            )
-            # raise specific exception
-            # return
-            raise asyncio.exceptions.TimeoutError(
-                f"Error fetching references for {cur_paper_id} - {response.status_code}"
-            )
+            logger.error(f"Error fetching references for {cur_paper_id} - {response.status_code}")
+            return
 
-        logger.debug(
-            f"Fetching references for {cur_paper_id} - {response.status_code}"
-        )
+        logger.debug(f"Fetching references for {cur_paper_id} - {response.status_code}")
 
         result_data = response.json()
         found_references = result_data["data"]
         found_references = [ref["citedPaper"] for ref in found_references]
 
-        ref_ids = [
-            ref["paperId"]
-            for ref in found_references
-            if ref["paperId"] is not None
-        ]
+        ref_ids = [ref["paperId"] for ref in found_references if ref["paperId"] is not None]
         cur_paper["references"] = ref_ids
         cur_paper["allReferencesStored"] = True
         if len(ref_ids) != cur_paper["referenceCount"]:
@@ -230,9 +239,7 @@ class Crawler:
     #     parser.feed(text)
     #     return parser.found_references
 
-    async def on_found_papers(
-        self, papers: List[dict], initial: bool = False
-    ) -> None:
+    async def on_found_papers(self, papers: List[dict], initial: bool = False) -> None:
         """
         Called when new papers are found. Filters out papers that have already been seen and puts the new ones in the queue.
         """
@@ -240,11 +247,7 @@ class Crawler:
             for paper in papers:
                 await self.put_todo(paper)
             return
-        ids = {
-            paper["paperId"]
-            for paper in papers
-            if paper["paperId"] is not None
-        }
+        ids = {paper["paperId"] for paper in papers if paper["paperId"] is not None}
         new = ids - self.seen
         self.seen.update(new)
 
@@ -270,7 +273,8 @@ async def main() -> None:
     #     timeout=my_timeout,
     #     trust_env=True,
     # )
-    async with httpx.AsyncClient(timeout=100) as client:
+    timeout = httpx.Timeout(10, connect=10, read=None, write=10)
+    async with httpx.AsyncClient(timeout=timeout) as client:
         # starting with the famous paper 'Attention is all you need'
         # https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/204e3073870fae3d05bcbc2f6a8e263d9b72e776
         crawler = Crawler(
@@ -293,11 +297,17 @@ async def main() -> None:
         await crawler.run()
     end = time.perf_counter()
 
-    print("Results:")
-    print(f"Crawled: {len(crawler.done)} Papers")
-    print(f"Found: {len(crawler.seen)} Papers")
-    print(f"Done in {end - start:.2f}s")
+    logger.info("Results:")
+    logger.info(f"Crawled: {len(crawler.done)} Papers")
+    logger.info(f"Found: {len(crawler.seen)} Papers")
+    logger.info(f"Done in {end - start:.2f}s")
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# TODO
+# 1. Batch processing of seed papers
+# 2. Initialize seen from dataset to avoid restarting over
+# 3. Null abstract papers need to be removed from the dataset

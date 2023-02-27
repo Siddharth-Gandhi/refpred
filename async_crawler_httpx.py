@@ -119,7 +119,7 @@ class Crawler:
         await self.on_found_papers([result_data], initial=True)
 
     async def run(self) -> None:
-        """Run the crawler"""
+        """Run the crawler by creating workers until todo queue is empty"""
         await self.init_queue()
         workers = [
             asyncio.create_task(self.worker()) for _ in range(self.num_workers)
@@ -129,6 +129,7 @@ class Crawler:
             worker.cancel()
 
     async def worker(self) -> None:
+        """One worker processes one paper at a time from the queue in a loop until cancelled"""
         while True:
             try:
                 await self.process_one()
@@ -233,7 +234,7 @@ class Crawler:
         self, papers: List[dict], initial: bool = False
     ) -> None:
         """
-      Called when new papers are found. Filters out papers that have already been seen and puts the new ones in the queue.
+        Called when new papers are found. Filters out papers that have already been seen and puts the new ones in the queue.
         """
         if initial:
             for paper in papers:

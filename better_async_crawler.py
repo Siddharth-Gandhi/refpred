@@ -1,12 +1,16 @@
 import asyncio
 import logging
 import time
-from typing import List
+from dataclasses import dataclass, field
+from typing import Any, List
 
 import httpx  # https://github.com/encode/httpx
+
 # from motor.motor_asyncio import AsyncIOMotorClient
 import requests
 from pymongo import MongoClient
+from pymongo.collection import Collection
+from pymongo.database import Database
 
 from config import S2_API_KEY, S2_RATE_LIMIT
 
@@ -45,41 +49,48 @@ class TimeoutException(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class MongoDB:
+    """A MongoDB database"""
+
+    mongo_url: str = "mongodb://localhost:27017"
+    db_name: str = "refpred"
+    collection_name: str = "test"
+    client: MongoClient = field(init=False, repr=False)
+    db: Database[Any] = field(init=False, repr=False)
+    collection: Collection[Any] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Initialize the MongoDB database and collection"""
+        self.client = MongoClient(self.mongo_url)
+        self.db = self.client[self.db_name]
+        all_collections = self.db.list_collection_names()
+        if self.collection_name in all_collections:
+            logger.warning(f"Dropped pre-existing '{self.collection_name}' collection")
+            self.db.drop_collection(self.collection_name)
+        logger.info(f"Created '{self.collection_name}' collection")
+        self.collection = self.db[self.collection_name]
+
+
+@dataclass
 class Crawler:
     """A crawler for the Semantic Scholar API"""
 
-    def __init__(
-        self,
-        client: httpx.AsyncClient,
-        # intial paper IDs to start crawling from
-        initial_papers: List[str],
-        workers: int = 10,
-        max_papers: int = 100,
-        # s2_rate_limit: int = 20,
-        mongo_url: str = "mongodb://localhost:27017",
-        db_name: str = "refpred",
-        collection_name: str = "test",
-    ) -> None:
-        self.client = client
-        self.mongo_url = mongo_url
-        self.initial_papers = initial_papers
-        self.todo = asyncio.Queue()
-        self.seen = set()
-        self.done = set()
-        self.retry = set()
-        # self.s2_rate_limit = s2_rate_limit
-        self.num_workers = workers
-        self.max_papers = max_papers
-        self.total = 0
-        self.stored = 0
-        self.headers = {
-            "Content-type": "application/json",
-            "x-api-key": S2_API_KEY,
-        }
-        self.db_name = db_name
-        self.collection_name = collection_name
-        # self.semaphore = asyncio.Semaphore(s2_rate_limit)
-        self.init_db()
+    client: httpx.AsyncClient
+    initial_papers: List[str]
+    workers: int = 10
+    max_papers: int = 100
+    todo = asyncio.Queue()
+    seen = set()
+    done = set()
+    retry = set()
+    total = 0
+    stored = 0
+    headers = {
+        "Content-type": "application/json",
+        "x-api-key": S2_API_KEY,
+    }
+    mongodb: MongoDB = MongoDB()
 
     @classmethod
     def from_dict(cls, settings: dict) -> "Crawler":

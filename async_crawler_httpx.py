@@ -4,7 +4,6 @@ import time
 from typing import List
 
 import httpx  # https://github.com/encode/httpx
-
 # from motor.motor_asyncio import AsyncIOMotorClient
 import requests
 from pymongo import MongoClient
@@ -137,6 +136,7 @@ class Crawler:
                 return
 
     async def process_one(self) -> None:
+        """Gets one paper from the queue and processes it"""
         # cur_paper is a dict
         cur_paper = await self.todo.get()
         try:
@@ -159,7 +159,7 @@ class Crawler:
 
     async def crawl(self, cur_paper: dict) -> None:
         """
-        Crawl a paper and its references
+        Crawl a paper and its references, stores them in the database.
         """
         # TODO proper rate limiting to 100 requests / second
         # await asyncio.sleep(1 / self.num_workers)
@@ -232,7 +232,9 @@ class Crawler:
     async def on_found_papers(
         self, papers: List[dict], initial: bool = False
     ) -> None:
-        # print(papers)
+        """
+      Called when new papers are found. Filters out papers that have already been seen and puts the new ones in the queue.
+        """
         if initial:
             for paper in papers:
                 await self.put_todo(paper)
@@ -250,6 +252,7 @@ class Crawler:
                 await self.put_todo(paper)
 
     async def put_todo(self, paper: dict) -> None:
+        """Put a paper in the queue"""
         # paper is a dict with fields like paper_id, title, abstract, etc.
         if self.total >= self.max_papers:
             return
@@ -258,6 +261,7 @@ class Crawler:
 
 
 async def main() -> None:
+    """Main function"""
     start = time.perf_counter()
     # timeout_sec = 100
     # my_timeout = aiohttp.ClientTimeout(total=None)

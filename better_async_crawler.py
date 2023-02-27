@@ -1,96 +1,58 @@
+'''
+A crawler for the Semantic Scholar API.
+'''
+
 import asyncio
 import logging
+import logging.config
 import time
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import List, Set
 
 import httpx  # https://github.com/encode/httpx
-
-# from motor.motor_asyncio import AsyncIOMotorClient
 import requests
-from pymongo import MongoClient
-from pymongo.collection import Collection
-from pymongo.database import Database
 
 from config import S2_API_KEY, S2_RATE_LIMIT
+from db import MongoDBClient
+from utils import get_paper_url, get_reference_url
 
-# import aiohttp
-
-
-LOG_FILE = "logs/crawler.log"
-
-
+logging.config.fileConfig(fname="logging.conf", disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-stream_handler = logging.StreamHandler()
-stream_handler.setFormatter(formatter)
-file_handler = logging.FileHandler(LOG_FILE, mode="w")
-file_handler.setFormatter(formatter)
-logger.addHandler(stream_handler)
-logger.addHandler(file_handler)
-
-
-# async def create_async_crawler(settings):
-#     crawler = Crawler.from_dict(settings)
-#     await crawler.init_db()
-#     return crawler
-
 
 class RateLimitExceededException(Exception):
     """Exception raised when rate limit is exceeded"""
 
-    pass
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return f"RateLimitExceededException: {self.message}"
 
 
 class TimeoutException(Exception):
     """Exception raised when a request times out"""
+    def __init__(self, message):
+        self.message = message
 
-    pass
-
-
-@dataclass(frozen=True)
-class MongoDB:
-    """A MongoDB database"""
-
-    mongo_url: str = "mongodb://localhost:27017"
-    db_name: str = "refpred"
-    collection_name: str = "test"
-    client: MongoClient = field(init=False, repr=False)
-    db: Database[Any] = field(init=False, repr=False)
-    collection: Collection[Any] = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        """Initialize the MongoDB database and collection"""
-        self.client = MongoClient(self.mongo_url)
-        self.db = self.client[self.db_name]
-        all_collections = self.db.list_collection_names()
-        if self.collection_name in all_collections:
-            logger.warning(f"Dropped pre-existing '{self.collection_name}' collection")
-            self.db.drop_collection(self.collection_name)
-        logger.info(f"Created '{self.collection_name}' collection")
-        self.collection = self.db[self.collection_name]
+    def __str__(self):
+        return f"TimeoutException: {self.message}"
 
 
-@dataclass
+@dataclass()
 class Crawler:
     """A crawler for the Semantic Scholar API"""
 
-    client: httpx.AsyncClient
-    initial_papers: List[str]
-    workers: int = 10
+    client: httpx.AsyncClient = field(repr=False)
+    initial_papers: List[str] = field(default_factory=list)
+    num_workers: int = 10
     max_papers: int = 100
-    todo = asyncio.Queue()
-    seen = set()
-    done = set()
-    retry = set()
-    total = 0
-    stored = 0
-    headers = {
-        "Content-type": "application/json",
-        "x-api-key": S2_API_KEY,
-    }
-    mongodb: MongoDB = MongoDB()
+    mongodb_client: MongoDBClient = MongoDBClient()
+    headers: dict = field(repr=False, default_factory=dict)
+    todo: asyncio.Queue = field(init=False, repr=False, default_factory=asyncio.Queue)
+    seen: Set[str]= field(init=False, default_factory=set)
+    done: Set[str] = field(init=False, default_factory=set)
+    retry: Set[str] = field(init=False, default_factory=set)
+    total: int = field(init=False, default=0)
 
     @classmethod
     def from_dict(cls, settings: dict) -> "Crawler":
@@ -98,35 +60,10 @@ class Crawler:
         Create a Crawler instance from a dict of settings"""
         return cls(**settings)
 
-    def init_db(self) -> None:
-        """Initialize the MongoDB database and collection"""
-        client = MongoClient(self.mongo_url)
-        # collection_name = 'async_crawler'
-        self.db = client[self.db_name]
-        all_collections = self.db.list_collection_names()
-        if self.collection_name in all_collections:
-            logger.warning(f"Dropped pre-existing '{self.collection_name}' collection")
-            self.db.drop_collection(self.collection_name)
-        test_collection = self.db[self.collection_name]
-        logger.info(f"Created '{self.collection_name}' collection")
-        self.collection = test_collection
-
-    def get_reference_url(self, paper_id, is_arxiv: bool = False) -> str:
-        """Get the URL for the references of a paper"""
-        if is_arxiv:
-            return f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{paper_id}/references?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
-        return f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}/references?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
-
-    def get_paper_url(self, paper_id, is_arxiv: bool = False) -> str:
-        """Get the URL for a paper"""
-        if is_arxiv:
-            return f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{paper_id}?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
-        return f"https://api.semanticscholar.org/graph/v1/paper/{paper_id}?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
-
     async def init_queue(self) -> None:
         """Initialize the queue with the initial papers"""
         initial_paper_id = self.initial_papers[0]
-        initial_url = self.get_paper_url(initial_paper_id)
+        initial_url = get_paper_url(initial_paper_id)
         response = requests.get(initial_url, headers=self.headers, timeout=10)
         if response.status_code != 200:
             logger.error(f"Error fetching paper {initial_paper_id}")
@@ -190,7 +127,7 @@ class Crawler:
         await asyncio.sleep(0.5)
 
         cur_paper_id = cur_paper["paperId"]
-        ref_url = self.get_reference_url(cur_paper_id)
+        ref_url = get_reference_url(cur_paper_id)
         cur_paper["_id"] = cur_paper_id
         if cur_paper["title"] is None or cur_paper["abstract"] is None:
             logger.debug(f"Skipping {cur_paper_id} as empty title or abstract")
@@ -237,11 +174,12 @@ class Crawler:
         if len(ref_ids) != cur_paper["referenceCount"]:
             cur_paper["allReferencesStored"] = False
 
-        self.collection.insert_one(cur_paper)
+        # self.collection.insert_one(cur_paper)
+        self.mongodb_client.insert_one(cur_paper)
         self.done.add(cur_paper["paperId"])
-        self.stored += 1
-        if self.stored % 100 == 0:
-            logger.info(f"Stored {self.stored} papers")
+        # self.stored += 1
+        # if self.stored % 100 == 0:
+        #     logger.info(f"Stored {self.stored} papers")
 
         await self.on_found_papers(found_references)
 
@@ -278,33 +216,22 @@ class Crawler:
 async def main() -> None:
     """Main function"""
     start = time.perf_counter()
-    # timeout_sec = 100
-    # my_timeout = aiohttp.ClientTimeout(total=None)
-    # client_args = dict(
-    #     timeout=my_timeout,
-    #     trust_env=True,
-    # )
+    headers={
+        "Content-type": "application/json",
+        "x-api-key": S2_API_KEY,
+    }
+    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='test')
     timeout = httpx.Timeout(10, connect=10, read=None, write=10)
     async with httpx.AsyncClient(timeout=timeout) as client:
         # starting with the famous paper 'Attention is all you need'
-        # https://www.semanticscholar.org/paper/Attention-is-All-you-Need-Vaswani-Shazeer/204e3073870fae3d05bcbc2f6a8e263d9b72e776
         crawler = Crawler(
             client=client,
             initial_papers=["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
-            # filter_url=filterer.filter_url,
-            workers=S2_RATE_LIMIT,
+            num_workers=S2_RATE_LIMIT,
             max_papers=10000,
-            db_name="refpred",
-            collection_name="async_crawler_test2",
+            mongodb_client=mongodb_client,
+            headers=headers,
         )
-        # settings = {
-        #     'client': client,
-        #     'initial_papers': ["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
-        #     'workers': 100,
-        #     'max_papers': 100,
-        # }
-        # crawler = await create_async_crawler(settings)
-        # time.sleep(1)
         await crawler.run()
     end = time.perf_counter()
 

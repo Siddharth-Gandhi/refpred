@@ -1,5 +1,6 @@
 import asyncio
 import json
+
 # import numpy as np
 # import pandas as pd
 import logging
@@ -10,7 +11,7 @@ import requests
 from pymongo import MongoClient
 
 from config import S2_API_KEY, S2_RATE_LIMIT
-from data.db import get_papers_db
+from data.old_db import get_papers_db
 
 pdb = get_papers_db(flag='r')
 logger = logging.getLogger(__name__)
@@ -124,5 +125,6 @@ if __name__ == '__main__':
 
     data = json.dumps({"ids": ids})
     response = requests.post(batch_url, data=data, headers=headers)
+    print(response.status_code)
     batch_response = response.json()
     asyncio.run(main(batch_response, papers))

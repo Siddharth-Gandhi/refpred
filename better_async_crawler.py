@@ -3,18 +3,20 @@ A crawler for the Semantic Scholar API.
 '''
 
 import asyncio
+import json
 import logging
 import logging.config
+import sys
 import time
 from dataclasses import dataclass, field
-from typing import List, Set
+from typing import Dict, List, Set
 
 import httpx  # https://github.com/encode/httpx
 import requests
 
 from config import S2_API_KEY, S2_RATE_LIMIT
 from db import MongoDBClient
-from utils import get_paper_url, get_reference_url
+from utils import get_batch_url, get_paper_url, get_reference_url
 
 logging.config.fileConfig(fname="logging.conf", disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
@@ -46,41 +48,54 @@ class Crawler:
     initial_papers: List[str] = field(default_factory=list)
     num_workers: int = 10
     max_papers: int = 100
-    mongodb_client: MongoDBClient = MongoDBClient()
+    mongodb_client: MongoDBClient = field(default_factory=MongoDBClient)
     headers: dict = field(repr=False, default_factory=dict)
     todo: asyncio.Queue = field(init=False, repr=False, default_factory=asyncio.Queue)
     seen: Set[str]= field(init=False, default_factory=set)
     done: Set[str] = field(init=False, default_factory=set)
-    retry: Set[str] = field(init=False, default_factory=set)
+    retry: Dict[str, int] = field(init=False, default_factory=dict)
     total: int = field(init=False, default=0)
+    MAX_RETRIES: int = field(init=False, default=3)
 
     @classmethod
     def from_dict(cls, settings: dict) -> "Crawler":
         """
         Create a Crawler instance from a dict of settings"""
         return cls(**settings)
-
-    async def init_queue(self) -> None:
-        """Initialize the queue with the initial papers"""
-        initial_paper_id = self.initial_papers[0]
-        initial_url = get_paper_url(initial_paper_id)
-        response = requests.get(initial_url, headers=self.headers, timeout=10)
-        if response.status_code != 200:
-            logger.error(f"Error fetching paper {initial_paper_id}")
-            return None
-        logger.debug(f"Fetching intial paper {initial_paper_id}")
-        result_data = response.json()
-        result_data["_id"] = result_data["paperId"]
-        # prime the queue
-        await self.on_found_papers([result_data], initial=True)
-
+    
     async def run(self) -> None:
         """Run the crawler by creating workers until todo queue is empty"""
+        self.init_done()
         await self.init_queue()
         workers = [asyncio.create_task(self.worker()) for _ in range(self.num_workers)]
         await self.todo.join()
         for worker in workers:
             worker.cancel()
+
+    async def init_queue(self) -> None:
+        """Initialize the queue with the initial papers"""
+        batch_url = get_batch_url()
+        data = json.dumps({"ids": self.initial_papers})
+        response = requests.post(url=batch_url, data=data, headers=self.headers, timeout=10)
+        # initial_paper_id = self.initial_papers[0]
+        # initial_url = get_paper_url(initial_paper_id)
+        # response = requests.get(initial_url, headers=self.headers, timeout=10)
+        if response.status_code != 200:
+            logger.error("Error fetching initial papers")
+            sys.exit(1)
+        logger.debug(f"Fetching data for intial papers {self.initial_papers}")
+        result_data = response.json()
+        # result_data["_id"] = result_data["paperId"]
+        for paper in result_data:
+            paper["_id"] = paper["paperId"]
+        # prime the queue
+        await self.on_found_papers(result_data, initial=True)
+
+    def init_done(self) -> None:
+        """Initialize the seen set with already stored papers from DB"""
+        # self.seen = set(self.initial_papers)
+        self.done = self.mongodb_client.get_ids()
+        logger.info(f"Already stored {len(self.done)} papers")
 
     async def worker(self) -> None:
         """One worker processes one paper at a time from the queue in a loop until cancelled"""
@@ -90,14 +105,16 @@ class Crawler:
             except asyncio.CancelledError:
                 return
 
-    async def retry_crawl(self, paper):
+    async def retry_crawl(self, paper) -> None:
         """Retry crawling a paper in case of an exception"""
-        if paper["_id"] in self.retry:
-            logger.error(f"Error processing {paper['_id']} even after retrying")
+        if paper["_id"] in self.retry and self.retry[paper["_id"]] > self.MAX_RETRIES:
+            logger.error(f"Error processing {paper['_id']} even after retrying {self.MAX_RETRIES} times")
             return
-        logger.info(f"Retrying for {paper['_id']}")
-        self.retry.add(paper["_id"])
+        # self.retry.add(paper["_id"])
+        self.retry[paper["_id"]] = self.retry.get(paper["_id"], 0) + 1
+        logger.info(f"Retry #{self.retry[paper['_id']]} for {paper['_id']}")
         # await self.todo.put_nowait(cur_paper)
+        await asyncio.sleep(1)
         await self.crawl(paper)
 
     async def process_one(self) -> None:
@@ -124,7 +141,7 @@ class Crawler:
         """
         # TODO proper rate limiting to 100 requests / second
         # await asyncio.sleep(1 / self.num_workers)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(1)
 
         cur_paper_id = cur_paper["paperId"]
         ref_url = get_reference_url(cur_paper_id)
@@ -220,15 +237,18 @@ async def main() -> None:
         "Content-type": "application/json",
         "x-api-key": S2_API_KEY,
     }
-    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='test')
+    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='papers')
     timeout = httpx.Timeout(10, connect=10, read=None, write=10)
+    # based on https://towardsdatascience.com/top-10-research-papers-in-ai-1f02cf844e26
+    initial_papers = ["204e3073870fae3d05bcbc2f6a8e263d9b72e776", "bee044c8e8903fb67523c1f8c105ab4718600cdb", "36eff562f65125511b5dfab68ce7f7a943c27478", "8388f1be26329fa45e5807e968a641ce170ea078", "846aedd869a00c09b40f1f1f35673cb22bc87490", "e0e9a94c4a6ba219e768b4e59f72c18f0a22e23d", "fa72afa9b2cbc8f0d7b05d52548906610ffbb9c5", "424561d8585ff8ebce7d5d07de8dbf7aae5e7270", "4d376d6978dad0374edfa6709c9556b42d3594d3", "a6cb366736791bcccc5c8639de5a8f9636bf87e8"]
+    MAX_PAPERS = 10000
     async with httpx.AsyncClient(timeout=timeout) as client:
         # starting with the famous paper 'Attention is all you need'
         crawler = Crawler(
             client=client,
-            initial_papers=["204e3073870fae3d05bcbc2f6a8e263d9b72e776"],
+            initial_papers=initial_papers,
             num_workers=S2_RATE_LIMIT,
-            max_papers=10000,
+            max_papers=MAX_PAPERS,
             mongodb_client=mongodb_client,
             headers=headers,
         )

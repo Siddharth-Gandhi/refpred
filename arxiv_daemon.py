@@ -4,14 +4,14 @@ it checks for any new arxiv papers via the arxiv API and stashes
 them into a sqlite database.
 """
 
+import argparse
+import logging
+import random
 import sys
 import time
-import random
-import logging
-import argparse
 
 from data.arxiv_api import get_response, parse_response
-from data.db import get_papers_db, get_metas_db
+from data.old_db import get_metas_db, get_papers_db
 
 if __name__ == '__main__':
 

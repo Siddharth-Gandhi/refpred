@@ -16,7 +16,7 @@ import requests
 
 from config import S2_API_KEY, S2_RATE_LIMIT
 from db import MongoDBClient
-from utils import get_batch_url, get_paper_url, get_reference_url
+from utils import get_batch_url, get_reference_url
 
 logging.config.fileConfig(fname="logging.conf", disable_existing_loggers=False)
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class Crawler:
         """
         Create a Crawler instance from a dict of settings"""
         return cls(**settings)
-    
+
     async def run(self) -> None:
         """Run the crawler by creating workers until todo queue is empty"""
         self.init_done()
@@ -148,6 +148,8 @@ class Crawler:
         cur_paper["_id"] = cur_paper_id
         if cur_paper["title"] is None or cur_paper["abstract"] is None:
             logger.debug(f"Skipping {cur_paper_id} as empty title or abstract")
+            # I have no clue why this total -= 1 is here, it shouldn't be required, but crawler just prematurely stops
+            self.total -= 1
             return
         # async with self.semaphore:
         # async with self.client.get(ref_url, headers=self.headers) as response:
@@ -184,7 +186,7 @@ class Crawler:
         result_data = response.json()
         found_references = result_data["data"]
         found_references = [ref["citedPaper"] for ref in found_references]
-
+        found_references = sorted(found_references, key=lambda x: x["citationCount"] or 0, reverse=True)
         ref_ids = [ref["paperId"] for ref in found_references if ref["paperId"] is not None]
         cur_paper["references"] = ref_ids
         cur_paper["allReferencesStored"] = True
@@ -237,10 +239,10 @@ async def main() -> None:
         "Content-type": "application/json",
         "x-api-key": S2_API_KEY,
     }
-    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='papers')
+    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='review2_demo', init_new=True)
     timeout = httpx.Timeout(10, connect=10, read=None, write=10)
     # based on https://towardsdatascience.com/top-10-research-papers-in-ai-1f02cf844e26
-    initial_papers = ["204e3073870fae3d05bcbc2f6a8e263d9b72e776", "bee044c8e8903fb67523c1f8c105ab4718600cdb", "36eff562f65125511b5dfab68ce7f7a943c27478", "8388f1be26329fa45e5807e968a641ce170ea078", "846aedd869a00c09b40f1f1f35673cb22bc87490", "e0e9a94c4a6ba219e768b4e59f72c18f0a22e23d", "fa72afa9b2cbc8f0d7b05d52548906610ffbb9c5", "424561d8585ff8ebce7d5d07de8dbf7aae5e7270", "4d376d6978dad0374edfa6709c9556b42d3594d3", "a6cb366736791bcccc5c8639de5a8f9636bf87e8"]
+    initial_papers = ["204e3073870fae3d05bcbc2f6a8e263d9b72e776", "bee044c8e8903fb67523c1f8c105ab4718600cdb", "36eff562f65125511b5dfab68ce7f7a943c27478", "8388f1be26329fa45e5807e968a641ce170ea078", "846aedd869a00c09b40f1f1f35673cb22bc87490", "e0e9a94c4a6ba219e768b4e59f72c18f0a22e23d", "fa72afa9b2cbc8f0d7b05d52548906610ffbb9c5", "424561d8585ff8ebce7d5d07de8dbf7aae5e7270", "4d376d6978dad0374edfa6709c9556b42d3594d3", "a6cb366736791bcccc5c8639de5a8f9636bf87e8", "df2b0e26d0599ce3e70df8a9da02e51594e0e992", "913f54b44dfb9202955fe296cf5586e1105565ea", "156d217b0a911af97fa1b5a71dc909ccef7a8028", "a3e4ceb42cbcd2c807d53aff90a8cb1f5ee3f031", "5c5751d45e298cea054f32b392c12c61027d2fe7", "bc1586a2e74d6d1cf87b083c4cbd1eede2b09ea5", "921b2958cac4138d188fd5047aa12bbcf37ac867", "cb92a7f9d9dbcf9145e32fdfa0e70e2a6b828eb1"]
     MAX_PAPERS = 10000
     async with httpx.AsyncClient(timeout=timeout) as client:
         # starting with the famous paper 'Attention is all you need'

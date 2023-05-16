@@ -1,0 +1,69 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RefPred</title>
+    <link rel="stylesheet" href="static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="icon" href="static/favicon.ico" type="image/x-icon">
+
+</head>
+
+<body>
+    <div class="container">
+        <h1>RefPred</h1>
+        <form id="search-form">
+            <input type="text" id="title" placeholder="Enter paper title" required>
+            <textarea id="abstract" rows="5" placeholder="Enter paper abstract (optional)"></textarea>
+            <button type="submit">Find Recommendations</button>
+        </form>
+        <div id="results"></div>
+    </div>
+    <footer>
+        <p>Made by <a href="https://www.ssgandhi.com/" target="_blank">Siddharth Gandhi</a> &nbsp; | &nbsp; <a
+                href="https://github.com/siddharth-Gandhi/refpred/" target="_blank">Source</a></p>
+    </footer>
+    <script src="static/app.js"></script>
+</body>
+
+</html> -->
+
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RefPred</title>
+    <link rel="stylesheet" href="static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="icon" href="static/favicon.ico" type="image/x-icon">
+</head>
+
+<body>
+    <div class="container">
+        <h1>RefPred</h1>
+        <p class="description">Enter a title and abstract to find relevant papers. Trained on a limited dataset of
+            papers in ML space so please enter topics similar to Attention, Transformers, Recommender Systems, and Deep
+            Learning only.</p>
+        <form id="search-form">
+            <input type="text" id="title" placeholder="Enter paper title" required>
+            <textarea id="abstract" rows="5" placeholder="Enter paper abstract (optional)"></textarea>
+            <input type="number" id="num_papers" placeholder="Number of papers to fetch (suggested: 20, max: 1000)"
+                min="10" max="1000" step="1" required>
+            <button type="submit">Find Recommendations</button>
+        </form>
+        <div id="results"></div>
+    </div>
+    <footer>
+        <p>Made by <a href="https://www.ssgandhi.com/" target="_blank">Siddharth Gandhi</a> &nbsp; | &nbsp; <a
+                href="https://github.com/siddharth-Gandhi/refpred/" target="_blank">Source</a></p>
+    </footer>
+    <script src="static/app.js"></script>
+</body>
+
+</html>

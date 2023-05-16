@@ -7,6 +7,7 @@ import logging.config
 from dataclasses import dataclass, field
 from typing import Set
 
+import pymongo
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
@@ -50,17 +51,32 @@ class MongoDBClient:
         if self.stored % 100 == 0:
             logger.info(f"Inserted {self.stored} documents")
 
+    # def insert_many(self, documents: list) -> None:
+    #     """Insert multiple documents into the collection"""
+    #     self.collection.insert_many(documents)
+    #     # self.stored += len(documents)
+    #     object.__setattr__(self, "stored", self.stored + len(documents))
+    #     if self.stored % 100 == 0:
+    #         logger.info(f"Inserted {self.stored} documents")
+
     def insert_many(self, documents: list) -> None:
-        """Insert multiple documents into the collection"""
-        self.collection.insert_many(documents)
-        # self.stored += len(documents)
-        object.__setattr__(self, "stored", self.stored + len(documents))
+        """Insert multiple documents into the collection or update if _id already exists"""
+        bulk_operations = [
+            pymongo.UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+            for doc in documents
+        ]
+        result = self.collection.bulk_write(bulk_operations)
+        upserted_count = result.upserted_count
+        modified_count = result.modified_count
+
+        object.__setattr__(self, "stored", self.stored + upserted_count + modified_count)
+
         if self.stored % 100 == 0:
-            logger.info(f"Inserted {self.stored} documents")
+            logger.info(f"Inserted {upserted_count} new documents and modified {modified_count} existing documents. Total documents: {self.stored}")
+
 
     def get_ids(self) -> Set[str]:
         """Get all the ids in the collection"""
         ids = self.collection.find({}, {"_id": 1})
         return {obj["_id"] for obj in ids}
 
-        

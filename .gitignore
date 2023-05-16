@@ -1,3 +1,4 @@
+*.pth
 config.py
 temp.py
 20200705v1/
@@ -8,6 +9,7 @@ data/
 Book Recommendation System.ipynb
 temp.ipynb
 Testing.ipynb
+t2.py
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

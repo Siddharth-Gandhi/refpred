@@ -61,22 +61,39 @@ class MongoDBClient:
 
     def insert_many(self, documents: list) -> None:
         """Insert multiple documents into the collection or update if _id already exists"""
+
+        ##### DEBUG #####
+        # for doc in documents:
+        #     print(f"ID to insert/update: {doc['_id']}")
+
+        # doc_id_to_check = documents[0]["_id"]
+        # doc_in_db = self.collection.find_one({"_id": doc_id_to_check})
+        # print(f"Doc in DB with ID {doc_id_to_check}: {doc_in_db}")
+        ##### /DEBUG #####
+
         bulk_operations = [
-            pymongo.UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
-            for doc in documents
+            pymongo.UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True) for doc in documents
         ]
         result = self.collection.bulk_write(bulk_operations)
+        ##### DEBUG #####
+        # try:
+        #     result = self.collection.bulk_write(bulk_operations)
+        # except pymongo.errors.BulkWriteError as bwe:
+        #     print(bwe.details)
+        ##### /DEBUG #####
+
+        print(result.upserted_count, result.modified_count, result.acknowledged)
         upserted_count = result.upserted_count
         modified_count = result.modified_count
 
         object.__setattr__(self, "stored", self.stored + upserted_count + modified_count)
 
         if self.stored % 100 == 0:
-            logger.info(f"Inserted {upserted_count} new documents and modified {modified_count} existing documents. Total documents: {self.stored}")
-
+            logger.info(
+                f"Inserted {upserted_count} new documents and modified {modified_count} existing documents. Total documents: {self.stored}"
+            )
 
     def get_ids(self) -> Set[str]:
         """Get all the ids in the collection"""
         ids = self.collection.find({}, {"_id": 1})
         return {obj["_id"] for obj in ids}
-

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import sys
 import time
@@ -11,6 +12,8 @@ import pandas as pd
 import requests
 from db import MongoDBClient
 from tqdm.asyncio import tqdm
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class TqdmAsync(AbstractAsyncContextManager):
@@ -27,15 +30,16 @@ class TqdmAsync(AbstractAsyncContextManager):
         self._tqdm.close()
 
 
-
 def get_batch_url() -> str:
     """Get the URL for a batch of papers"""
-    # return 'https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles'
+    return "https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
 
-    return 'https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,year'
+    # return "https://api.semanticscholar.org/graph/v1/paper/batch?fields=title,abstract,year"
+
 
 def split_list(lst, chunk_size):
-    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+    return [lst[i : i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
 
 # async def fetch_and_store_data(client, ids_batch, mongodb_client, progress):
 #     # Replace this URL with the actual API endpoint.
@@ -75,17 +79,22 @@ def split_list(lst, chunk_size):
 #     # Update the progress bar.
 #     progress.update(1)
 
+
 async def fetch_and_store_data(client, ids_batch, mongodb_client, max_retries=3):
     # Replace this URL with the actual API endpoint.
     url = "https://api.semanticscholar.org/graph/v1/paper/batch"
-    params={'fields': 'abstract,title,year'}
+    # params = {"fields": "abstract,title,year"}
+    params = {
+        "fields": "title,abstract,url,venue,publicationVenue,year,referenceCount,citationCount,influentialCitationCount,isOpenAccess,openAccessPdf,authors,externalIds,fieldsOfStudy,s2FieldsOfStudy,publicationTypes,publicationDate,journal,citationStyles"
+    }
 
     # Modify the payload if necessary, depending on the API's requirements.
     payload = {"ids": ids_batch}
-
     for attempt in range(max_retries + 1):
         try:
-            response = await client.post(url, json=payload, params=params, headers=headers, timeout=40)
+            response = await client.post(
+                url, json=payload, params=params, headers=headers, timeout=40
+            )
         except httpx.TimeoutException:
             if attempt < max_retries:
                 await asyncio.sleep(5)  # Sleep before retrying.
@@ -97,24 +106,28 @@ async def fetch_and_store_data(client, ids_batch, mongodb_client, max_retries=3)
         if response.status_code == 429:
             # rate limit
             print(f"Rate limit reached. Waiting for {response.headers['Retry-After']} seconds")
-            await asyncio.sleep(int(response.headers['Retry-After']))
+            await asyncio.sleep(int(response.headers["Retry-After"]))
             continue
 
         if response.status_code != 200:
             if attempt < max_retries:
-                print(f"Error in attempt {attempt+1} for  fetchin data for {len(ids_batch)} IDs. [{response.status_code}] Retrying...")
+                print(
+                    f"Error in attempt {attempt+1} for  fetchin data for {len(ids_batch)} IDs. [{response.status_code}] Retrying..."
+                )
                 await asyncio.sleep(1)  # Sleep before retrying.
                 continue
             else:
-                print(f"Error fetching data for IDs: {len(ids_batch)} with status code {response.status_code}")
+                print(
+                    f"Error fetching data for IDs: {len(ids_batch)} with status code {response.status_code}"
+                )
                 return
 
         result_data = response.json()
+        print(result_data)
         # Filter out None objects from result_data
         result_data = [paper for paper in result_data if paper is not None]
-
-
         for paper in result_data:
+            print(paper["paperId"])
             paper["_id"] = paper["paperId"]
 
         # Replace this with the actual collection in your MongoClient instance.
@@ -124,12 +137,10 @@ async def fetch_and_store_data(client, ids_batch, mongodb_client, max_retries=3)
         break
 
     # Sleep for a second to avoid rate limiting.
-    await asyncio.sleep(1)
+    await asyncio.sleep(2)
 
     # Update the progress bar.
     # progress.update(1)
-
-
 
 
 async def worker(client, ids_batches, mongodb_client, max_retries):
@@ -138,7 +149,9 @@ async def worker(client, ids_batches, mongodb_client, max_retries):
         await fetch_and_store_data(client, ids_batch, mongodb_client, max_retries=max_retries)
 
 
-async def fetch_and_store_data_concurrently(ids_batches, mongodb_client, num_workers=10, max_retries=3):
+async def fetch_and_store_data_concurrently(
+    ids_batches, mongodb_client, num_workers=10, max_retries=3
+):
     async with httpx.AsyncClient() as client:
         tasks = []
         # async with TqdmAsync(total=len(ids_batches), desc="Processing batches") as progress:
@@ -148,17 +161,21 @@ async def fetch_and_store_data_concurrently(ids_batches, mongodb_client, num_wor
         await asyncio.gather(*tasks)
 
 
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     sys.path.append(os.getcwd())
     from config import S2_API_KEY  # pylint: disable=import-error
-    headers={
+
+    headers = {
         "Content-type": "application/json",
         "x-api-key": S2_API_KEY,
     }
     batch_url = get_batch_url()
-    mongodb_client = MongoDBClient(mongo_url='mongodb://localhost:27017', db_name='refpred', collection_name='all_references', init_new=False)
+    mongodb_client = MongoDBClient(
+        mongo_url="mongodb://localhost:27017",
+        db_name="refpred",
+        collection_name="new_all_references_full_metadata",
+        init_new=False,
+    )
 
     existing_ids = set(mongodb_client.get_ids())
     print(f"Total existing IDs: {len(existing_ids)}")
@@ -166,15 +183,16 @@ if __name__ == '__main__':
     # read ref_ids from data/all_ref_ids.txt where each id is on a separate line
 
     ref_ids = []
-    with open('data/all_ref_ids.txt', 'r') as f:
+    with open("data/missing_ids.txt", "r") as f:
         ref_ids.extend(line.strip() for line in f)
-
+    print(f"Total ref IDs: {len(ref_ids)}")
     ref_ids = [ref_id for ref_id in ref_ids if ref_id not in existing_ids]
-
-    chunks = split_list(ref_ids, 100)
+    CHUNK_SIZE = 500
+    chunks = split_list(ref_ids, CHUNK_SIZE)
 
     # chunks = chunks[:100]
 
     print(f"Total chunks: {len(chunks)}")
-    asyncio.run(fetch_and_store_data_concurrently(chunks, mongodb_client, num_workers=10, max_retries=5))
-
+    asyncio.run(
+        fetch_and_store_data_concurrently(chunks, mongodb_client, num_workers=10, max_retries=5)
+    )

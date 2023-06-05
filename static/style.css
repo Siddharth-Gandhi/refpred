@@ -1,13 +1,14 @@
-/* body {
-    display: flex;
-    flex-direction: column;
-    font-family: 'Roboto', sans-serif;
-    max-width: 800px;
-    margin: 0 auto;
-    color: #444;
-    background-color: #f4f4f4;
-    min-height: 100vh;
-    padding-bottom: 60px;
+body {
+  display: flex;
+  flex-direction: column;
+  font-family: "Roboto", sans-serif;
+  max-width: 800px;
+  margin: 0 auto;
+  color: #444;
+  background-color: #f4f4f4;
+  min-height: 100vh;
+  padding-bottom: 60px;
+
 }
 
 h1,
@@ -16,300 +17,204 @@ h3,
 h4,
 h5,
 h6 {
-    font-family: 'Roboto Slab', serif;
+  font-family: "Roboto Slab", serif;
+}
+
+.description {
+  font-size: 14px;
+  text-align: center;
+  margin-bottom: 10px;
+  color: #777;
 }
 
 .container {
-    width: 100%;
-    padding: 10px;
+  width: 100%;
+  padding: 10px;
 }
 
 input,
 textarea {
-    display: block;
-    width: 100%;
-    margin-bottom: 10px;
-    padding: 10px;
-    font-size: 16px;
-    border-radius: 5px;
-    border: 1px solid #ccc;
-    font-family: 'Roboto', sans-serif;
+  display: block;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px;
+  font-size: 16px;
+  border-radius: 5px;
+  border: 1px solid #ccc;
+  font-family: "Roboto", sans-serif;
 }
 
 #search-form {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 
 }
 
 .button-container {
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    margin-bottom: 20px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
 }
 
 button {
-    padding: 10px 20px;
-    font-size: 16px;
-    border: none;
-    border-radius: 5px;
-    background-color: #5C7AEA;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-
+  padding: 10px 20px;
+  font-size: 16px;
+  border: none;
+  border-radius: 5px;
+  background-color: #5c7aea;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
     margin: 10px 10px 20px 10px;
-
 }
 
 button:hover {
-    background-color: #EA5C7A;
+  background-color: #ea5c7a;
 }
 
 .card {
-    border: 1px solid #ccc;
-    border-radius: 5px;
-    padding: 20px;
-    margin-bottom: 15px;
-    background-color: white;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 20px;
+  margin-bottom: 15px;
+  background-color: white;
+    transition: background-color 0.3s ease;
+      position: relative;
+        /* Add this line */
+
+}
+
+.card .abstract {
+  display: none;
+  transition: max-height 0.2s ease-out;
+  overflow: hidden;
+}
+
+.card.clicked .abstract {
+  display: block;
+}
+
+/* .card:hover {
+  background-color: #e6e6e6;
+
+} */
+
+/* .card {
+  cursor: pointer;
+} */
+
+.bibtex-button {
+  background-color: #5c7aea;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  margin-top: 10px;
+  margin-right: 0px;
+}
+
+.expand-button {
+  /* For aligning Bibtex button and expand button with Year and Score */
+  display: inline-block;
+  vertical-align: middle;
+  margin-top: 10px;
+  margin-left: 0px;
+}
+
+.bibtex-box {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: #e6e6e6;
+  font-family: 'Courier New', monospace;
+  white-space: pre;
+  overflow: scroll;
+
 }
 
 h1 {
-    text-align: center;
-    color: #5C7AEA;
+  text-align: center;
+  color: #5c7aea;
 }
 
 .url {
-    display: inline-block;
-    margin-top: 10px;
+  display: inline-block;
+  margin-top: 10px;
+}
+
+.year,
+.score {
+  font-weight: bold;
+  /* Make 'Year' and 'Score' text bold */
 }
 
 footer {
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    text-align: center;
-    padding: 10px 0;
-    background-color: #5C7AEA;
-    color: white;
-    font-size: 14px;
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  text-align: center;
+  padding: 10px 0;
+  background-color: #5c7aea;
+  color: white;
+  font-size: 14px;
 }
 
 footer a {
-    color: white;
-    text-decoration: none;
+  color: white;
+  text-decoration: none;
 }
 
 footer a:hover {
-    text-decoration: underline;
+  text-decoration: underline;
+}
+
+/* .expand-arrow {
+  position: absolute;
+  right: 15px;
+  bottom: 10px;
+  cursor: pointer;
+  transition: transform 0.3s ease;
+}
+
+.card.clicked .expand-arrow {
+  transform: rotate(180deg);
+} */
+
+.expand-button {
+  /* Styles for new expand and minimize button */
+  color: #5c7aea;
+  background-color: #f4f4f4;
+  border: 2px solid #5c7aea;
+  border-radius: 5px;
+  padding: 5px 10px;
+  cursor: pointer;
+  margin-top: 10px;
+  font-size: 14px;
+  transition: background-color 0.3s ease;
+}
+
+.expand-button:hover {
+  color: #f4f4f4;
+  background-color: #5c7aea;
 }
 
 @media (max-width: 900px) {
-    .container {
-        padding: 10px 20px;
-    }
-
-    input,
-    textarea {
-        width: 90%;
-        margin: 0 auto 10px auto;
-        padding: 10px;
-        box-sizing: border-box;
-    }
-
-    .card {
-        margin: 0 20px 15px 20px;
-        padding: 20px;
-    }
-} */
-
-  body {
-    display: flex;
-    flex-direction: column;
-    font-family: "Roboto", sans-serif;
-    max-width: 800px;
-    margin: 0 auto;
-    color: #444;
-    background-color: #f4f4f4;
-    min-height: 100vh;
-    padding-bottom: 60px;
-
-  }
-
-  h1,
-  h2,
-  h3,
-  h4,
-  h5,
-  h6 {
-    font-family: "Roboto Slab", serif;
-  }
-
-  .description {
-    font-size: 14px;
-    text-align: center;
-    margin-bottom: 10px;
-    color: #777;
-  }
-
   .container {
-    width: 100%;
-    padding: 10px;
+    padding: 10px 20px;
   }
-
   input,
   textarea {
-    display: block;
-    width: 100%;
-    margin-bottom: 10px;
+    width: 90%;
+    margin: 0 auto 10px auto;
     padding: 10px;
-    font-size: 16px;
-    border-radius: 5px;
-    border: 1px solid #ccc;
-    font-family: "Roboto", sans-serif;
-  }
-
-  #search-form {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-
-  }
-
-  .button-container {
-    width: 100%;
-    display: flex;
-    justify-content: center;
-    margin-bottom: 20px;
-  }
-
-  button {
-    padding: 10px 20px;
-    font-size: 16px;
-    border: none;
-    border-radius: 5px;
-    background-color: #5c7aea;
-    color: white;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-      margin: 10px 10px 20px 10px;
-  }
-
-  button:hover {
-    background-color: #ea5c7a;
+    box-sizing: border-box;
   }
 
   .card {
-    border: 1px solid #ccc;
-    border-radius: 5px;
+    margin: 0 20px 15px 20px;
     padding: 20px;
-    margin-bottom: 15px;
-    background-color: white;
-      transition: background-color 0.3s ease;
-        position: relative;
-          /* Add this line */
-
   }
-
-  .card .abstract {
-    display: none;
-    transition: max-height 0.2s ease-out;
-    overflow: hidden;
-  }
-
-  .card.clicked .abstract {
-    display: block;
-  }
-
-  /* .card:hover {
-    background-color: #e6e6e6;
-
-  } */
-
-  /* .card {
-    cursor: pointer;
-  } */
-
-  .bibtex-button {
-    background-color: #5c7aea;
-    color: white;
-    border: none;
-    border-radius: 5px;
-    padding: 5px 10px;
-    cursor: pointer;
-    margin-top: 10px;
-  }
-
-  .bibtex-box {
-    margin-top: 10px;
-    padding: 10px;
-    background-color: #e6e6e6;
-    font-family: 'Courier New', monospace;
-    white-space: pre;
-    overflow: scroll;
-
-  }
-
-  h1 {
-    text-align: center;
-    color: #5c7aea;
-  }
-
-  .url {
-    display: inline-block;
-    margin-top: 10px;
-  }
-
-  footer {
-    position: fixed;
-    left: 0;
-    bottom: 0;
-    width: 100%;
-    text-align: center;
-    padding: 10px 0;
-    background-color: #5c7aea;
-    color: white;
-    font-size: 14px;
-  }
-
-  footer a {
-    color: white;
-    text-decoration: none;
-  }
-
-  footer a:hover {
-    text-decoration: underline;
-  }
-
-  .expand-arrow {
-    position: absolute;
-    right: 15px;
-    bottom: 10px;
-    cursor: pointer;
-    transition: transform 0.3s ease;
-  }
-
-  .card.clicked .expand-arrow {
-    transform: rotate(180deg);
-  }
-
-  @media (max-width: 900px) {
-    .container {
-      padding: 10px 20px;
-    }
-    input,
-    textarea {
-      width: 90%;
-      margin: 0 auto 10px auto;
-      padding: 10px;
-      box-sizing: border-box;
-    }
-
-    .card {
-      margin: 0 20px 15px 20px;
-      padding: 20px;
-    }
-  }
+}
